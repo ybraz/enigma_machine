@@ -20,7 +20,7 @@ import os
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 # Se você estiver no Windows, descomente a linha abaixo.
-import winsound
+# import winsound
 
 class EnigmaMachine:
     def __init__(self, rotors, reflector, plugboard):
@@ -180,7 +180,7 @@ def print_with_delay(message, delay=0.1):
         print(char, end='', flush=True)
         time.sleep(delay)
         # Se você estiver no Windows, descomente a linha abaixo.
-        winsound.Beep(500, 100)
+        # winsound.Beep(500, 100)
     print()
 
 def clear_screen():
