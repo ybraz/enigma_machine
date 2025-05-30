@@ -17,10 +17,15 @@ import random
 import string
 import time
 import os
+import hmac
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-# Se você estiver no Windows, descomente a linha abaixo.
-# import winsound
+# Tentativa de importar winsound para feedback sonoro opcional no Windows
+try:
+    import winsound
+    CAN_BEEP = True
+except ImportError:
+    CAN_BEEP = False
 
 class EnigmaMachine:
     def __init__(self, rotors, reflector, plugboard):
@@ -179,8 +184,8 @@ def print_with_delay(message, delay=0.1):
     for char in message:
         print(char, end='', flush=True)
         time.sleep(delay)
-        # Se você estiver no Windows, descomente a linha abaixo.
-        # winsound.Beep(500, 100)
+        if CAN_BEEP:
+            winsound.Beep(500, 100)  # Frequência de 500Hz, duração de 100ms
     print()
 
 def clear_screen():
@@ -208,7 +213,7 @@ def main():
     option = input("Opção: ")
 
     if option == '1':
-        message = input("Digite a mensagem (apenas letras A-Z): ").upper()
+        message = input("Digite a mensagem (letras A-Z serão convertidas para maiúsculas; outros caracteres serão preservados): ").upper()
         password = getpass.getpass("Digite a senha: ")
 
         rotors, reflector, plugboard, initial_positions, rotor_order, reflector_choice = derive_configuration_from_password(password)
@@ -217,9 +222,41 @@ def main():
         enigma.set_rotor_positions(initial_positions)
 
         encrypted_message = enigma.encrypt_message(message)
-        key = hashlib.sha256(password.encode()).digest()
-        iv = hashlib.md5(reflector.encode()).digest()  # Usando um hash MD5 para derivar um IV fixo e variável
-        final_encrypted_message = aes_encrypt_decrypt(encrypted_message.encode(), key, iv, 'encrypt')
+        
+        # --- Criptografia AES e HMAC ---
+        # 1. Gerar um salt aleatório para PBKDF2
+        salt = os.urandom(16) 
+        
+        # 2. Derivar chaves AES e HMAC da senha usando PBKDF2
+        # Isso gera 64 bytes: 32 para a chave AES-256 e 32 para a chave HMAC-SHA256.
+        # PBKDF2 ajuda a proteger contra ataques de força bruta na senha.
+        derived_key = hashlib.pbkdf2_hmac(
+            'sha256',             # Algoritmo hash
+            password.encode(),    # Senha (bytes)
+            salt,                 # Salt (bytes)
+            100000,               # Iterações (quanto mais, mais seguro, porém mais lento)
+            dklen=64              # Comprimento da chave derivada em bytes
+        )
+        aes_key = derived_key[:32]   # Primeiros 32 bytes para AES
+        hmac_key = derived_key[32:]  # Próximos 32 bytes para HMAC
+
+        # 3. Gerar um Vetor de Inicialização (IV) aleatório de 16 bytes para AES
+        # O IV garante que a mesma mensagem criptografada várias vezes com a mesma chave
+        # produza ciphertexts diferentes. Essencial para a segurança do AES.
+        iv = os.urandom(16)
+        
+        # 4. Criptografar a mensagem (saída da Enigma) usando AES
+        aes_encrypted_data = aes_encrypt_decrypt(encrypted_message.encode(), aes_key, iv, 'encrypt')
+        
+        # 5. Construir os dados para autenticação HMAC: salt + iv + aes_ciphertext
+        # O HMAC protegerá a integridade e autenticidade desses três componentes.
+        data_to_auth = salt + iv + aes_encrypted_data
+        
+        # 6. Calcular o HMAC tag sobre data_to_auth
+        hmac_tag = hmac.new(hmac_key, data_to_auth, hashlib.sha256).digest()
+        
+        # 7. Concatenar tudo para a mensagem final: salt (16B) + iv (16B) + aes_ciphertext + hmac_tag (32B)
+        final_encrypted_message = data_to_auth + hmac_tag
         
         clear_screen()
         print("""
@@ -234,13 +271,59 @@ def main():
         encrypted_message = input("Digite a mensagem criptografada: ")
         password = getpass.getpass("Digite a senha: ")
 
-        encrypted_message_bytes = base64.b64decode(encrypted_message)
-        key = hashlib.sha256(password.encode()).digest()
-        rotors, reflector, plugboard, initial_positions, rotor_order, reflector_choice = derive_configuration_from_password(password)
-        iv = hashlib.md5(reflector.encode()).digest()  # Usando um hash MD5 para derivar um IV fixo e variável
+        encrypted_message_blob = base64.b64decode(encrypted_message) # Dados completos: salt + IV + ciphertext + HMAC
+        
+        # --- Descriptografia AES e Verificação HMAC ---
+        # A estrutura esperada é: salt (16B) + iv (16B) + aes_ciphertext (?) + hmac_tag (32B)
 
+        # 1. Extrair o HMAC recebido (últimos 32 bytes, assumindo HMAC-SHA256)
+        received_hmac = encrypted_message_blob[-32:]
+        # O restante é o que precisa ser verificado (salt + iv + ciphertext)
+        data_to_verify = encrypted_message_blob[:-32]
+
+        # 2. Extrair o salt (primeiros 16 bytes de data_to_verify)
+        salt = data_to_verify[:16]
+        # 3. Extrair o IV (próximos 16 bytes de data_to_verify)
+        iv = data_to_verify[16:32]
+        # O restante de data_to_verify é o ciphertext AES puro
+        encrypted_data_for_aes = data_to_verify[32:]
+
+        # 4. Re-derivar as chaves AES e HMAC usando PBKDF2 com o salt extraído
+        # É crucial usar os mesmos parâmetros de PBKDF2 (hash, iterações, dklen) da criptografia.
+        derived_key = hashlib.pbkdf2_hmac(
+            'sha256',
+            password.encode(),
+            salt,
+            100000,
+            dklen=64
+        )
+        aes_key = derived_key[:32]
+        hmac_key = derived_key[32:]
+
+        # 5. Calcular o HMAC esperado sobre os dados extraídos (data_to_verify)
+        # Isso recalcula o HMAC como se estivéssemos criptografando, para comparar com o recebido.
+        calculated_hmac = hmac.new(hmac_key, data_to_verify, hashlib.sha256).digest()
+        
+        # 6. Verificar o HMAC
+        # hmac.compare_digest é usado para prevenir ataques de temporização.
+        if not hmac.compare_digest(calculated_hmac, received_hmac):
+            print("\nErro: A mensagem está corrompida, foi adulterada ou a senha está incorreta. Verificação HMAC falhou.")
+            # A configuração da Enigma é mostrada abaixo, mas pode ser incorreta se a senha estiver errada.
+            print("\nConfiguração da Enigma (pode não ser relevante se a mensagem estiver corrompida ou a senha incorreta):")
+            temp_rotors, temp_reflector, temp_plugboard, temp_initial_positions, temp_rotor_order, temp_reflector_choice = derive_configuration_from_password(password)
+            print(f"Rotores: {temp_rotors}")
+            print(f"Ordem dos Rotores: {temp_rotor_order}")
+            print(f"Posições Iniciais: {temp_initial_positions}")
+            print(f"Refletor: {temp_reflector_choice}")
+            print(f"Plugboard: {temp_plugboard}")
+            return # Interrompe o processamento se o HMAC for inválido
+
+        # Se o HMAC for válido, prosseguir com a descriptografia e o processamento da Enigma
+        rotors, reflector, plugboard, initial_positions, rotor_order, reflector_choice = derive_configuration_from_password(password)
+        
         try:
-            decrypted_bytes = aes_encrypt_decrypt(encrypted_message_bytes, key, iv, 'decrypt')
+            # 7. Descriptografar os dados AES
+            decrypted_bytes = aes_encrypt_decrypt(encrypted_data_for_aes, aes_key, iv, 'decrypt')
             decrypted_message = decrypted_bytes.decode('utf-8')
             
             enigma = EnigmaMachine(rotors, reflector, plugboard)
@@ -257,16 +340,38 @@ def main():
             """)
             print_with_delay(final_decrypted_message, 0.2)
         except UnicodeDecodeError:
-            print("\nErro: A senha fornecida está incorreta ou a mensagem está corrompida.")
+            print("\nErro: A senha fornecida está incorreta ou a mensagem está corrompida. Não foi possível decodificar os dados da Enigma.")
     else:
         print("Opção inválida!")
 
-    print("\nConfiguração da Enigma:")
-    print(f"Rotores: {rotors}")
-    print(f"Ordem dos Rotores: {rotor_order}")
-    print(f"Posições Iniciais: {initial_positions}")
-    print(f"Refletor: {reflector_choice}")
-    print(f"Plugboard: {plugboard}")
+    # Exibe a configuração da Enigma derivada da senha.
+    # Nota: Se a descriptografia falhou devido à senha incorreta, esta configuração também será baseada nessa senha incorreta.
+    # Em caso de falha de HMAC, esta seção é alcançada após a mensagem de erro HMAC e o 'return'.
+    # Se a descriptografia for bem-sucedida, 'rotors', etc., são definidos corretamente.
+    # Se a opção for inválida, 'rotors' etc. não serão definidos, causando um erro se tentarmos imprimi-los aqui sem um 'else' que os defina ou saia.
+    # Para simplificar, vamos garantir que só imprimimos se 'rotors' foi definido, o que acontece nos caminhos '1' e '2' (após o HMAC check no '2').
+    if option in ['1', '2']: # Apenas imprime se a configuração foi derivada.
+        # No caso de falha de HMAC, 'rotors' etc. não são redefinidos no escopo de main() antes do return,
+        # então esta impressão não ocorreria nesse caso específico, o que é bom.
+        # No entanto, se a falha for UnicodeDecodeError, 'rotors' etc. *foram* definidos.
+        # E se a opção for '1', também são definidos.
+        # O 'return' na falha de HMAC impede que esta seção seja impressa para esse erro específico.
+        # Se o HMAC passar, mas UnicodeDecodeError ocorrer, esta seção será impressa.
+        # Se a criptografia (opção '1') for bem-sucedida, esta seção será impressa.
+
+        # A mensagem de erro HMAC já exibe uma configuração "temporária".
+        # Se o HMAC falhar, a função retorna, então esta seção não é executada.
+        # Se o HMAC passar, mas a decodificação UTF-8 falhar, esta seção é executada.
+        # Se a criptografia (opção 1) for executada, esta seção é executada.
+        # Basicamente, esta seção será impressa se option '1' ou se option '2' e HMAC passar.
+    # E também se HMAC passar mas a decodificação UTF-8 falhar.
+    if 'rotors' in locals() or 'rotors' in globals(): # Verifica se 'rotors' foi definido
+        print("\nConfiguração da Enigma utilizada/derivada:")
+        print(f"Rotores: {rotors}")
+        print(f"Ordem dos Rotores: {rotor_order}")
+        print(f"Posições Iniciais: {initial_positions}")
+        print(f"Refletor: {reflector_choice}")
+        print(f"Plugboard: {plugboard}")
 
 if __name__ == "__main__":
     main()
