@@ -1,16 +1,16 @@
 """
-Máquina Enigma usando AES-GCM para Criptografia
+Enigma Machine using AES-GCM for Cryptography
 
-História:
-A Máquina Enigma foi uma ferramenta de criptografia utilizada principalmente durante a Segunda Guerra Mundial.
-Ela foi inventada pelo engenheiro alemão Arthur Scherbius no final da década de 1910 e usada extensivamente pelas forças militares alemãs.
-A Máquina Enigma permitia a substituição de letras em mensagens de forma complexa, usando uma combinação de rotores, um refletor e uma configuração de plugboard, tornando suas mensagens extremamente difíceis de decifrar.
-As mensagens cifradas pela Enigma eram consideradas quase impossíveis de serem quebradas, até que os esforços dos criptógrafos aliados, como Alan Turing e sua equipe em Bletchley Park, conseguiram decifrá-las, mudando o rumo da guerra.
+History:
+The Enigma Machine was a cryptography tool used primarily during World War II.
+It was invented by German engineer Arthur Scherbius in the late 1910s and used extensively by German military forces.
+The Enigma Machine allowed complex letter substitution in messages using a combination of rotors, a reflector, and a plugboard configuration, making its messages extremely difficult to decipher.
+Messages encrypted by Enigma were considered nearly impossible to break, until the efforts of Allied cryptographers, such as Alan Turing and his team at Bletchley Park, managed to decipher them, changing the course of the war.
 
-Este código implementa uma versão moderna e segura da Máquina Enigma, complementada com criptografia AES-GCM (AEAD), derivação de chave forte com Argon2id, e recursos avançados de segurança.
+This code implements a modern and secure version of the Enigma Machine, complemented with AES-GCM (AEAD) cryptography, strong key derivation with Argon2id, and advanced security features.
 
-ATENÇÃO: Este é um sistema de criptografia para fins educacionais e experimentais.
-Para uso em produção, utilize bibliotecas de criptografia estabelecidas como NaCl/libsodium, Age, ou PGP.
+WARNING: This is a cryptography system for educational and experimental purposes.
+For production use, utilize established cryptography libraries such as NaCl/libsodium, Age, or PGP.
 """
 
 import getpass
@@ -37,25 +37,25 @@ from argon2 import PasswordHasher
 from argon2.low_level import hash_secret_raw, Type
 import pyperclip
 
-# Versão do formato de criptografia
+# Cryptography format version
 CRYPTO_VERSION = 2
 
-# Parâmetros de segurança
+# Security parameters
 ARGON2_TIME_COST = 3
 ARGON2_MEMORY_COST = 65536  # 64 MB
 ARGON2_PARALLELISM = 4
 ARGON2_HASH_LEN = 32
 SALT_LENGTH = 32
-IV_LENGTH = 12  # GCM recomenda 12 bytes
+IV_LENGTH = 12  # GCM recommends 12 bytes
 TAG_LENGTH = 16  # GCM tag
 CONFIG_SALT_LENGTH = 16
 
 class PasswordStrength:
-    """Avalia a força de uma senha."""
+    """Evaluates password strength."""
 
     @staticmethod
     def calculate_entropy(password: str) -> float:
-        """Calcula a entropia da senha em bits."""
+        """Calculates password entropy in bits."""
         charset_size = 0
         if any(c.islower() for c in password):
             charset_size += 26
@@ -74,10 +74,10 @@ class PasswordStrength:
     @staticmethod
     def assess_strength(password: str) -> Tuple[str, str]:
         """
-        Avalia a força da senha.
+        Assesses password strength.
 
         Returns:
-            Tuple de (nível, mensagem)
+            Tuple of (level, message)
         """
         entropy = PasswordStrength.calculate_entropy(password)
 
@@ -94,16 +94,16 @@ class PasswordStrength:
 
 
 class EnigmaMachine:
-    """Implementação da Máquina Enigma."""
+    """Enigma Machine implementation."""
 
     def __init__(self, rotors: List[str], reflector: str, plugboard: Dict[str, str]):
         """
-        Inicializa a Máquina Enigma com os rotores, refletor e plugboard fornecidos.
+        Initializes the Enigma Machine with the provided rotors, reflector, and plugboard.
 
         Args:
-            rotors: Lista de strings representando os mapeamentos dos rotores.
-            reflector: String representando o mapeamento do refletor.
-            plugboard: Dicionário representando as conexões do plugboard.
+            rotors: List of strings representing rotor mappings.
+            reflector: String representing reflector mapping.
+            plugboard: Dictionary representing plugboard connections.
         """
         self.rotors = rotors
         self.reflector = reflector
@@ -112,16 +112,16 @@ class EnigmaMachine:
 
     def set_rotor_positions(self, positions: List[int]):
         """
-        Define as posições iniciais dos rotores.
+        Sets the initial rotor positions.
 
         Args:
-            positions: Lista de inteiros representando as posições iniciais dos rotores.
+            positions: List of integers representing initial rotor positions.
         """
         self.rotor_positions = positions
 
     def step_rotors(self):
         """
-        Avança a posição dos rotores, simulando o mecanismo de rotação da Máquina Enigma.
+        Advances rotor positions, simulating the Enigma Machine rotation mechanism.
         """
         for i in range(len(self.rotors)):
             self.rotor_positions[i] = (self.rotor_positions[i] + 1) % 26
@@ -130,13 +130,13 @@ class EnigmaMachine:
 
     def encrypt_character(self, char: str) -> str:
         """
-        Criptografa um único caractere usando a lógica da Máquina Enigma.
+        Encrypts a single character using Enigma Machine logic.
 
         Args:
-            char: Caractere a ser criptografado.
+            char: Character to be encrypted.
 
         Returns:
-            Caractere criptografado.
+            Encrypted character.
         """
         if char in self.plugboard:
             char = self.plugboard[char]
@@ -158,13 +158,13 @@ class EnigmaMachine:
 
     def encrypt_message(self, message: str) -> str:
         """
-        Criptografa uma mensagem completa.
+        Encrypts a complete message.
 
         Args:
-            message: Mensagem a ser criptografada.
+            message: Message to be encrypted.
 
         Returns:
-            Mensagem criptografada.
+            Encrypted message.
         """
         encrypted_message = ''
         for char in message:
@@ -176,7 +176,7 @@ class EnigmaMachine:
 
 
 class CryptoConfig:
-    """Gerencia configuração de criptografia."""
+    """Manages cryptography configuration."""
 
     ROTOR_WIRING = {
         'I': 'EKMFLGDQVZNTOWYHXUSPAIBRCJ',
@@ -194,14 +194,14 @@ class CryptoConfig:
     @staticmethod
     def derive_configuration_from_password(password: str, config_salt: bytes) -> Tuple:
         """
-        Deriva a configuração da Máquina Enigma a partir de uma senha e salt.
+        Derives Enigma Machine configuration from password and salt.
 
         Args:
-            password: Senha fornecida pelo usuário.
-            config_salt: Salt para derivar configuração (permite diferentes configs com mesma senha).
+            password: User-provided password.
+            config_salt: Salt for configuration derivation (allows different configs with same password).
 
         Returns:
-            Tupla contendo: rotors, reflector, plugboard, initial_positions, rotor_order, reflector_choice
+            Tuple containing: rotors, reflector, plugboard, initial_positions, rotor_order, reflector_choice
         """
         # Deriva seed da configuração usando a senha + salt
         seed_bytes = hash_secret_raw(
@@ -254,7 +254,7 @@ class CryptoConfig:
 
 
 class SecureEnigmaCrypto:
-    """Sistema de criptografia seguro usando Enigma + AES-GCM."""
+    """Secure cryptography system using Enigma + AES-GCM."""
 
     @staticmethod
     def derive_key_argon2(password: str, salt: bytes) -> bytes:
@@ -484,7 +484,7 @@ class SecureEnigmaCrypto:
 
 
 class HybridCrypto:
-    """Sistema híbrido usando X25519 + AES-GCM."""
+    """Hybrid system using X25519 + AES-GCM."""
 
     @staticmethod
     def generate_keypair() -> Tuple[bytes, bytes]:
@@ -598,7 +598,7 @@ class HybridCrypto:
 
 
 class FileEncryption:
-    """Criptografia de arquivos com streaming."""
+    """File encryption with streaming."""
 
     CHUNK_SIZE = 64 * 1024  # 64 KB chunks
 
